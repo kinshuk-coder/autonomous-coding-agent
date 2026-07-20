@@ -1,0 +1,3 @@
+[
+  {"id": "demo-001", "issue": "Add input validation for blank usernames.", "acceptance": "Blank usernames should be rejected and existing tests must pass."}
+]

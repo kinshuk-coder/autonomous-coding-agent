@@ -13,17 +13,19 @@ flowchart LR
 
 ## Quick start
 
-Prerequisites: Python 3.11+, Docker Desktop running, and an Google AI Studio API key.
+Prerequisites: Python 3.11+, Docker Desktop running, and an Mistral API key.
 
 ```bash
 python -m venv .venv
 .venv\\Scripts\\activate
 pip install -e ".[dev]"
 copy .env.example .env
-# add GEMINI_API_KEY to .env
+# add MISTRAL_API_KEY to .env
 docker build -t code-agent-sandbox:latest -f docker/sandbox.Dockerfile .
 code-agent run --repo . --issue "Add a helper that normalizes email addresses" --test "pytest -q"
 ```
+
+Mistral calls are paced at 0.83 requests/second by default and automatically retry 429 responses with exponential backoff. Configure this with MISTRAL_RPS and MISTRAL_MAX_RETRIES.
 
 The included sandbox image has pytest and Git. For a different target repo, set `SANDBOX_IMAGE` to an image containing its test toolchain.
 
@@ -39,7 +41,7 @@ code-agent apply-report --repo . --report agent-run.json
 code-agent eval --repo path/to/repo --benchmark benchmarks/example.json --test "pytest -q"
 ```
 
-This reports resolution rate, average retries, and mean latency. Run it before citing any metric on a resume.
+Each benchmark entry may include a `test_command`. For a shared fixture repo, use a scoped command such as `PYTHONPATH=src pytest -q tests/test_validators.py`; otherwise unrelated known failures invalidate every case.`n`nThis reports resolution rate, average retries, and mean latency. Run it before citing any metric on a resume.
 
 ## Safety properties
 
@@ -47,8 +49,6 @@ This reports resolution rate, average retries, and mean latency. Run it before c
 - Unified diffs are validated to prohibit path traversal and `.git` changes.
 - Retries are capped, and repeated test failures trigger escalation.
 - No PR creation or merge action is performed; human review is a terminal gate.
-
-
 
 
 

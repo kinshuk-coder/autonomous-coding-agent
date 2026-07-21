@@ -3,7 +3,7 @@ Name: autonomous-coding-agent
 Version: 0.1.0
 Summary: A safety-first coding agent with sandboxed execution and evaluation.
 Requires-Python: >=3.11
-Requires-Dist: google-genai>=1.0.0
+Requires-Dist: mistralai>=1.0.0
 Requires-Dist: pydantic>=2.7.0
 Requires-Dist: python-dotenv>=1.0.1
 Requires-Dist: rich>=13.7.1

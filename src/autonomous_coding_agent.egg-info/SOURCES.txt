@@ -13,6 +13,8 @@ src/coding_agent/llm.py
 src/coding_agent/models.py
 src/coding_agent/observability.py
 src/coding_agent/patches.py
+src/coding_agent/rate_limit.py
 src/coding_agent/runner.py
 src/coding_agent/sandbox.py
 tests/test_patches.py
+tests/test_rate_limit.py

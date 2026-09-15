@@ -26,7 +26,13 @@ def main() -> None:
         if report.repo.resolve() != repo: parser.error("Report repository does not match --repo; refusing to apply it.")
         apply_patch(report.patch, repo); console.print("[green]Applied the exact verified patch from the report.[/green]"); return
     cases, started = json.loads(args.benchmark.read_text(encoding="utf-8")), time.monotonic(); runner = make_runner(args.attempts)
-    results = [runner.run(args.repo, case["issue"], case.get("test_command", args.test)) for case in cases]; ready = [result for result in results if result.status == RunStatus.REVIEW_READY]
-    summary = {"cases":len(results), "review_ready":len(ready), "resolution_rate":len(ready)/len(results) if results else 0, "average_retries":sum(result.attempts-1 for result in results)/len(results) if results else 0, "elapsed_seconds":round(time.monotonic()-started,2)}
+    reports_dir = Path("eval-runs"); reports_dir.mkdir(exist_ok=True)
+    results = []
+    for case in cases:
+        result = runner.run(args.repo, case["issue"], case.get("test_command", args.test))
+        (reports_dir / f"{case['id']}.json").write_text(result.model_dump_json(indent=2), encoding="utf-8")
+        results.append(result)
+    ready = [result for result in results if result.status == RunStatus.REVIEW_READY]
+    summary = {"cases":len(results), "review_ready":len(ready), "resolution_rate":len(ready)/len(results) if results else 0, "average_retries":sum(result.attempts-1 for result in results)/len(results) if results else 0, "elapsed_seconds":round(time.monotonic()-started,2), "reports_dir":str(reports_dir)}
     Path("eval-report.json").write_text(json.dumps(summary, indent=2), encoding="utf-8"); console.print_json(json.dumps(summary))
 if __name__ == "__main__": main()

@@ -1,11 +1,23 @@
+# Python environments, caches, and build outputs
 .venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Secrets and local agent state
 .env
 .agent/
 .agent-worktree-*/
-.pytest_cache/
-.ruff_cache/
 
+# Generated agent and evaluation artifacts
 agent-run.json
 eval-report.json
+eval-runs/

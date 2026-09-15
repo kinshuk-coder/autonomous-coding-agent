@@ -36,11 +36,31 @@ class MistralAgent:
         content = self._complete(model=self.model, messages=[{"role":"user", "content":prompt}], response_format={"type":"json_object"}, temperature=0)
         return Plan.model_validate(json.loads(content))
     def patch(self, context: str, plan: Plan, feedback: str = "") -> str:
-        prompt = f"""You are a coding agent. Produce ONLY an applicable Git unified diff, never prose or Markdown fences.
+        example = '''diff --git a/src/demo_repo/slugify.py b/src/demo_repo/slugify.py
+--- a/src/demo_repo/slugify.py
++++ b/src/demo_repo/slugify.py
+@@ -1,4 +1,6 @@
+ import re
+ 
+ def slugify(text: str) -> str:
+     text = text.lower().strip()
++    text = text.strip("-")
+     return text'''
+        prompt = f"""You are a coding agent. Produce ONLY an applicable Git unified diff: no prose, no explanation, no Markdown code fences. Your entire response must start with `diff --git` and contain nothing else.
 Implement this plan: {plan.model_dump_json()}
 The existing tests in context are the acceptance oracle. Do not modify test files when they already cover this behavior; patch the production source only.
 For every modified existing file, begin with exactly `diff --git a/PATH b/PATH`, followed by `--- a/PATH` and `+++ b/PATH`. Include exact unchanged context from the supplied source. Do not represent an existing file as a new file.
 Respect the repository layout shown in context. Do not invent a top-level `src` Python package: in a Python src-layout project tests import the concrete package name (for example `coding_agent`), not `src.*`.
 Keep scope minimal. A retry must address verification feedback.
+
+CRITICAL FORMATTING RULES, each of these has caused rejected patches before:
+1. Every unchanged context line MUST start with exactly one literal space character, including blank lines. A context line that is blank must still contain a single space, never a fully empty line. This is the single most common cause of a "corrupt patch" rejection.
+2. Every added line starts with `+`, every removed line starts with `-`, every unchanged line starts with ` ` (space). No line in a hunk body may start with anything else.
+3. Hunk header line counts (`@@ -a,b +c,d @@`) must exactly match the number of old/new lines that follow it, and unchanged context lines count toward both.
+4. Output nothing before `diff --git` and nothing after the final line of the last hunk. No trailing commentary, no closing remarks, no code fences.
+
+Here is a correctly formatted example patch, showing the required blank-line and prefix handling:
+{example}
+
 FEEDBACK:\n{feedback}\n\n{context}"""
         return self._complete(model=self.model, messages=[{"role":"user", "content":prompt}], temperature=0)

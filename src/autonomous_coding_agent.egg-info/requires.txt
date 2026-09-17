@@ -1,4 +1,4 @@
-mistralai>=1.0.0
+groq>=0.31.0
 pydantic>=2.7.0
 python-dotenv>=1.0.1
 rich>=13.7.1

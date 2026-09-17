@@ -1,66 +1,95 @@
 from __future__ import annotations
-import json, os, time
-from mistralai.client import Mistral
+
+import json
+import os
+import re
+import time
+
+from groq import Groq
+
 from .models import Plan
 from .rate_limit import TokenRateLimiter
 
-class MistralAgent:
-    """Mistral client with RPS/TPM pacing and 429-aware exponential backoff."""
+_THINK_BLOCK = re.compile(r"<think>.*?</think>\s*", flags=re.DOTALL | re.IGNORECASE)
+
+
+class GroqAgent:
+    """Groq Qwen client with conservative RPM/TPM pacing and 429 backoff."""
+
     def __init__(self, model: str | None = None) -> None:
-        api_key = os.getenv("MISTRAL_API_KEY")
-        if not api_key: raise RuntimeError("MISTRAL_API_KEY is not set. Add it to your .env file.")
-        self.client = Mistral(api_key=api_key); self.model = model or os.getenv("MISTRAL_MODEL", "mistral-medium-3-5")
-        rps = float(os.getenv("MISTRAL_RPS", "0.83"))
-        if rps <= 0: raise ValueError("MISTRAL_RPS must be greater than zero")
-        self.min_interval_seconds, self.max_retries, self.next_request_at = 1 / rps, int(os.getenv("MISTRAL_MAX_RETRIES", "4")), 0.0
-        self.output_token_reserve = int(os.getenv("MISTRAL_OUTPUT_TOKEN_RESERVE", "2000")); self.token_limiter = TokenRateLimiter(int(os.getenv("MISTRAL_TPM", "25000")))
-    def _estimate_tokens(self, messages: object) -> int:
-        contents = [str(message.get("content", "")) for message in messages if isinstance(message, dict)]
-        return max(1, (sum(len(content) for content in contents) + 3) // 4 + self.output_token_reserve)
-    def _complete(self, **kwargs: object) -> str:
-        self.token_limiter.reserve(self._estimate_tokens(kwargs.get("messages", [])))
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise RuntimeError("GROQ_API_KEY is not set. Add it to your .env file.")
+        self.client = Groq(api_key=api_key)
+        self.model = model or os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b")
+        rpm = float(os.getenv("GROQ_RPM", "12"))
+        tpm = int(os.getenv("GROQ_TPM", "8000"))
+        safety_ratio = float(os.getenv("GROQ_TPM_SAFETY_RATIO", "0.70"))
+        if rpm <= 0 or tpm <= 0 or not 0 < safety_ratio <= 1:
+            raise ValueError("GROQ_RPM/TPM must be positive and safety ratio must be in (0, 1].")
+        self.min_interval_seconds = 60 / rpm
+        self.max_retries = int(os.getenv("GROQ_MAX_RETRIES", "4"))
+        self.next_request_at = 0.0
+        self.plan_output_tokens = int(os.getenv("GROQ_PLAN_MAX_TOKENS", "500"))
+        self.patch_output_tokens = int(os.getenv("GROQ_PATCH_MAX_TOKENS", "1000"))
+        self.plan_reasoning = os.getenv("GROQ_PLAN_REASONING_EFFORT", "none")
+        self.patch_reasoning = os.getenv("GROQ_PATCH_REASONING_EFFORT", "low")
+        self.token_limiter = TokenRateLimiter(int(tpm * safety_ratio))
+
+    @staticmethod
+    def _estimate_tokens(messages: list[dict[str, str]], output_tokens: int) -> int:
+        return max(1, (sum(len(message.get("content", "")) for message in messages) + 3) // 4 + output_tokens)
+
+    @staticmethod
+    def _final_content(content: str | None) -> str:
+        """Defend against raw Qwen <think> output if a provider ignores parsed reasoning."""
+        return _THINK_BLOCK.sub("", content or "").strip()
+
+    def _complete(self, *, messages: list[dict[str, str]], max_tokens: int, reasoning_effort: str, response_format: dict[str, str] | None = None) -> str:
+        estimated_tokens = self._estimate_tokens(messages, max_tokens)
         for attempt in range(self.max_retries + 1):
+            self.token_limiter.reserve(estimated_tokens)
             wait = self.next_request_at - time.monotonic()
-            if wait > 0: time.sleep(wait)
+            if wait > 0:
+                time.sleep(wait)
             self.next_request_at = time.monotonic() + self.min_interval_seconds
             try:
-                response = self.client.chat.complete(**kwargs)
-                return response.choices[0].message.content or ""
+                options: dict[str, object] = {
+                    "model": self.model,
+                    "messages": messages,
+                    "temperature": 0,
+                    "max_completion_tokens": max_tokens,
+                    "reasoning_effort": reasoning_effort,
+                    # Parsed reasoning keeps <think> content out of JSON and diffs.
+                    "reasoning_format": "parsed",
+                }
+                if response_format:
+                    options["response_format"] = response_format
+                response = self.client.chat.completions.create(**options)
+                return self._final_content(response.choices[0].message.content)
             except Exception as error:
-                limited = getattr(error, "status_code", None) == 429 or "429" in str(error)
-                if not limited or attempt == self.max_retries: raise
-                self.next_request_at = max(self.next_request_at, time.monotonic() + max(self.min_interval_seconds, 2 ** attempt))
+                status_code = getattr(error, "status_code", None)
+                limited = status_code == 429 or "429" in str(error)
+                if not limited or attempt == self.max_retries:
+                    raise
+                retry_after = getattr(getattr(error, "response", None), "headers", {}).get("retry-after")
+                try:
+                    delay = float(retry_after) if retry_after else 2 ** attempt
+                except (TypeError, ValueError):
+                    delay = 2 ** attempt
+                self.next_request_at = max(self.next_request_at, time.monotonic() + max(self.min_interval_seconds, delay))
         raise RuntimeError("Unreachable retry state")
+
     def plan(self, context: str, test_command: str) -> Plan:
         prompt = f'''You are a cautious software engineering planner. Return only a JSON object matching this schema: {{"summary":str,"in_scope":bool,"scope_reason":str,"steps":[{{"id":str,"description":str,"target_files":[str],"acceptance_criteria":[str]}}],"test_command":str}}. Reject vague or broad tasks by setting in_scope false. Make a small, testable plan. Respect existing repository structure and test conventions. Default test command: {test_command}\n\n{context}'''
-        content = self._complete(model=self.model, messages=[{"role":"user", "content":prompt}], response_format={"type":"json_object"}, temperature=0)
+        content = self._complete(messages=[{"role": "user", "content": prompt}], max_tokens=self.plan_output_tokens, reasoning_effort=self.plan_reasoning, response_format={"type": "json_object"})
         return Plan.model_validate(json.loads(content))
+
     def patch(self, context: str, plan: Plan, feedback: str = "") -> str:
-        example = '''diff --git a/src/demo_repo/slugify.py b/src/demo_repo/slugify.py
---- a/src/demo_repo/slugify.py
-+++ b/src/demo_repo/slugify.py
-@@ -1,4 +1,6 @@
- import re
- 
- def slugify(text: str) -> str:
-     text = text.lower().strip()
-+    text = text.strip("-")
-     return text'''
         prompt = f"""You are a coding agent. Produce ONLY an applicable Git unified diff: no prose, no explanation, no Markdown code fences. Your entire response must start with `diff --git` and contain nothing else.
 Implement this plan: {plan.model_dump_json()}
 The existing tests in context are the acceptance oracle. Do not modify test files when they already cover this behavior; patch the production source only.
 For every modified existing file, begin with exactly `diff --git a/PATH b/PATH`, followed by `--- a/PATH` and `+++ b/PATH`. Include exact unchanged context from the supplied source. Do not represent an existing file as a new file.
-Respect the repository layout shown in context. Do not invent a top-level `src` Python package: in a Python src-layout project tests import the concrete package name (for example `coding_agent`), not `src.*`.
 Keep scope minimal. A retry must address verification feedback.
-
-CRITICAL FORMATTING RULES, each of these has caused rejected patches before:
-1. Every unchanged context line MUST start with exactly one literal space character, including blank lines. A context line that is blank must still contain a single space, never a fully empty line. This is the single most common cause of a "corrupt patch" rejection.
-2. Every added line starts with `+`, every removed line starts with `-`, every unchanged line starts with ` ` (space). No line in a hunk body may start with anything else.
-3. Hunk header line counts (`@@ -a,b +c,d @@`) must exactly match the number of old/new lines that follow it, and unchanged context lines count toward both.
-4. Output nothing before `diff --git` and nothing after the final line of the last hunk. No trailing commentary, no closing remarks, no code fences.
-
-Here is a correctly formatted example patch, showing the required blank-line and prefix handling:
-{example}
-
 FEEDBACK:\n{feedback}\n\n{context}"""
-        return self._complete(model=self.model, messages=[{"role":"user", "content":prompt}], temperature=0)
+        return self._complete(messages=[{"role": "user", "content": prompt}], max_tokens=self.patch_output_tokens, reasoning_effort=self.patch_reasoning)

@@ -3,14 +3,14 @@ import argparse, json, time
 from pathlib import Path
 from dotenv import load_dotenv
 from rich.console import Console
-from .llm import MistralAgent
+from .llm import GroqAgent
 from .models import RunReport, RunStatus
 from .patches import apply_patch
 from .runner import AgentRunner
 from .sandbox import DockerSandbox
 
 def make_runner(attempts: int) -> AgentRunner:
-    return AgentRunner(MistralAgent(), DockerSandbox(), attempts)
+    return AgentRunner(GroqAgent(), DockerSandbox(), attempts)
 
 def main() -> None:
     load_dotenv(); parser = argparse.ArgumentParser(description="Run a sandboxed coding agent"); sub = parser.add_subparsers(dest="command", required=True)

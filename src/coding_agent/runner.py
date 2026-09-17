@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from .context import build_context
-from .llm import MistralAgent
+from .llm import GroqAgent
 from .models import RunReport, RunStatus, VerificationReport
 from .observability import RunStore
 from .patches import UnsafePatch, apply_patch, normalize_patch
@@ -15,13 +15,13 @@ from .sandbox import DockerSandbox
 
 
 class AgentRunner:
-    def __init__(self, llm: MistralAgent, sandbox: DockerSandbox, max_attempts: int = 3) -> None:
+    def __init__(self, llm: GroqAgent, sandbox: DockerSandbox, max_attempts: int = 3) -> None:
         self.llm, self.sandbox, self.max_attempts = llm, sandbox, max_attempts
 
     def run(self, repo: Path, issue: str, test_command: str, apply: bool = False) -> RunReport:
         repo = repo.resolve()
         run_id, store = str(uuid.uuid4()), RunStore(repo)
-        context = build_context(repo, issue, max_context_chars=int(os.getenv("MISTRAL_CONTEXT_CHARS", "8000")))
+        context = build_context(repo, issue, max_context_chars=int(os.getenv("GROQ_CONTEXT_CHARS", "3500")))
         plan = self.llm.plan(context, test_command)
         store.log(run_id, "plan", plan.model_dump())
         if not plan.in_scope:

@@ -3,7 +3,7 @@ name = "autonomous-coding-agent"
 version = "0.1.0"
 description = "A safety-first coding agent with sandboxed execution and evaluation."
 requires-python = ">=3.11"
-dependencies = ["mistralai>=1.0.0", "pydantic>=2.7.0", "python-dotenv>=1.0.1", "rich>=13.7.1"]
+dependencies = ["groq>=0.31.0", "pydantic>=2.7.0", "python-dotenv>=1.0.1", "rich>=13.7.1"]
 [project.optional-dependencies]
 dev = ["pytest>=8.2.0", "ruff>=0.5.0"]
 [project.scripts]

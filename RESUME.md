@@ -1,6 +1,6 @@
 # Resume-ready project description
 
-**Autonomous Coding Agent with Sandboxed Execution** | Python, Mistral API, Docker, SQLite
+**Autonomous Coding Agent with Sandboxed Execution** | Python, Groq API, Docker, SQLite
 
 - Built a safety-first autonomous coding agent that converts issue text into structured implementation plans and minimal unified-diff patches.
 - Isolated verification in ephemeral Docker containers with network disabled, CPU/memory/PID caps, a read-only root filesystem, and command timeouts.
